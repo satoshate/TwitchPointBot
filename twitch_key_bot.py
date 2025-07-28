@@ -66,7 +66,6 @@ def initial_setup(settings):
 
 # --- CORE LOGIC ---
 async def handle_key_action(key_name: str, settings: dict):
-    # ... (без изменений)
     key = key_name.lower()
     key_behavior = settings.get("key_behavior", {})
     try:
@@ -82,7 +81,6 @@ async def handle_key_action(key_name: str, settings: dict):
     except Exception as e: logger.error(f"Error while pressing key '{key.upper()}': {e}")
 
 async def handle_redemption_event(event: dict, settings: dict):
-    # ... (без изменений)
     try:
         reward_title = event.get("reward", {}).get("title")
         user_name = event.get("user_name")
@@ -97,7 +95,6 @@ async def handle_redemption_event(event: dict, settings: dict):
 
 # --- TWITCH EVENTSUB LISTENER ---
 async def subscribe_to_events(session_id: str, settings: dict):
-    # ... (без изменений)
     token = settings['twitch_oauth_token']
     headers = {
         "Client-ID": settings["twitch_client_id"],
@@ -131,7 +128,6 @@ async def subscribe_to_events(session_id: str, settings: dict):
             return True
 
 async def listen_to_eventsub(settings: dict):
-    # ... (без изменений)
     ws_url = "wss://eventsub.wss.twitch.tv/ws"
     try:
         async with websockets.connect(ws_url, ping_interval=20, ping_timeout=20) as ws:
@@ -148,6 +144,10 @@ async def listen_to_eventsub(settings: dict):
                 elif msg_type == "notification":
                     event = data["payload"]["event"]
                     await handle_redemption_event(event, settings)
+                elif msg_type == "session_reconnect":
+                    logger.warning("Reconnect message received. Reconnecting...")
+                elif msg_type == "session_keepalive":
+                    pass 
     except asyncio.CancelledError:
         logger.info("EventSub listener task cancelled.")
     except websockets.exceptions.ConnectionClosed as e:
@@ -159,43 +159,41 @@ async def listen_to_eventsub(settings: dict):
     finally:
         STOP_EVENT.set()
 
-# ### ИСПРАВЛЕННАЯ КОНСОЛЬ ###
+# --- CONSOLE WORKER ---
 async def console_input_worker(settings: dict):
     global RESTART_FLAG
     loop = asyncio.get_event_loop()
     logger.info("Control console is active. Type 'help' for a list of commands.")
     
-    # Убираем ошибочный таймаут и цикл while
-    # Теперь задача будет просто ждать ввода и завершится, когда будет отменена
     try:
-        while not loop.is_closed():
-            cmd_line = await loop.run_in_executor(None, sys.stdin.readline)
-            if STOP_EVENT.is_set():
-                break
-
+        while not STOP_EVENT.is_set():
+            cmd_line = await loop.run_in_executor(None, input)
+            
+            if STOP_EVENT.is_set(): break
+            
             parts = cmd_line.strip().split(maxsplit=2)
             if not parts: continue
             command = parts[0].lower()
 
             if command == "help":
-                print("\n--- CONSOLE COMMANDS ---")
-                print("  status                   - Show current settings")
-                print("  reward add \"<name>\" <key> - Add/edit a reward binding")
-                print("  reward remove \"<name>\"      - Remove a reward binding")
-                print("  holdkey add/remove <key> - Manage the HOLD keys list")
-                print("  presskey add/remove <key>- Manage the PRESS keys list")
-                print("  holdtime <number>        - Set the hold duration in seconds")
-                print("  restart                  - Restart the bot")
-                print("  exit                     - Exit the program")
-                print("--------------------------\n")
+                print("\n--- CONSOLE COMMANDS ---", flush=True)
+                print("  status                   - Show current settings", flush=True)
+                print("  reward add \"<name>\" <key> - Add/edit a reward binding", flush=True)
+                print("  reward remove \"<name>\"      - Remove a reward binding", flush=True)
+                print("  holdkey add/remove <key> - Manage the HOLD keys list", flush=True)
+                print("  presskey add/remove <key>- Manage the PRESS keys list", flush=True)
+                print("  holdtime <number>        - Set the hold duration in seconds", flush=True)
+                print("  restart                  - Restart the bot", flush=True)
+                print("  exit                     - Exit the program", flush=True)
+                print("--------------------------\n", flush=True)
 
             elif command == "status":
-                print("\n--- CURRENT SETTINGS ---")
+                print("\n--- CURRENT SETTINGS ---", flush=True)
                 status_settings = settings.copy()
                 if 'twitch_oauth_token' in status_settings:
                     status_settings['twitch_oauth_token'] = f"***{status_settings['twitch_oauth_token'][-4:]}"
-                print(json.dumps(status_settings, ensure_ascii=False, indent=4))
-                print("------------------------\n")
+                print(json.dumps(status_settings, ensure_ascii=False, indent=4), flush=True)
+                print("------------------------\n", flush=True)
 
             elif command == "reward" and len(parts) >= 2 and parts[1].lower() in ["add", "remove"]:
                 action = parts[1].lower()
@@ -245,14 +243,12 @@ async def console_input_worker(settings: dict):
             else:
                 logger.warning("Unknown command. Type 'help' for a list of commands.")
     except asyncio.CancelledError:
-        pass # Это нормальное завершение, когда основная задача отменяет консоль
+        pass
     finally:
         logger.info("Console worker stopped.")
 
-
 # --- MAIN EXECUTION BLOCK ---
 async def main():
-    # ... (без изменений)
     global RESTART_FLAG
     logger.warning("=" * 60); logger.warning("Bot is starting..."); logger.warning("=" * 60)
     
