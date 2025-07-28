@@ -6,8 +6,8 @@ title Twitch Channel Points Bot [Auto-Updater]
 :: 1. НАСТРОЙКА: УКАЖИТЕ ПРЯМЫЕ ССЫЛКИ НА ВАШИ ФАЙЛЫ НА GITHUB
 :: =================================================================
 :: Как получить ссылку: зайдите на GitHub, откройте файл, нажмите кнопку "Raw". Скопируйте URL из адресной строки.
-SET SCRIPT_URL="https://raw.githubusercontent.com/ВАШ_НИК/ВАШ_РЕПОЗИТОРИЙ/main/twitch_key_bot.py"
-SET REQS_URL="https://raw.githubusercontent.com/ВАШ_НИК/ВАШ_РЕПОЗИТОРИЙ/main/requirements.txt"
+SET SCRIPT_URL="https://raw.githubusercontent.com/satoshate/TwitchPointBot/refs/heads/main/twitch_key_bot.py"
+SET REQS_URL="https://raw.githubusercontent.com/satoshate/TwitchPointBot/refs/heads/main/requirements.txt"
 
 :: =================================================================
 :: 2. Общие настройки и проверка прав
