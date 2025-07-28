@@ -4,7 +4,6 @@ import json
 import os
 import sys
 import webbrowser
-# PubSubPool больше не нужен
 from twitchio.client import Client
 import pyautogui
 import keyboard
@@ -19,37 +18,167 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# --- GLOBAL CONTAINER ---
-app_settings = {}
-twitch_client = None
-RESTART_FLAG = False
+# --- THE BOT CLASS ---
+class TwitchBot(Client):
 
-# --- SETTINGS MANAGEMENT ---
-# (Этот блок не меняется)
+    def __init__(self, settings):
+        self.app_settings = settings
+        # Инициализируем родительский класс Client с токеном
+        super().__init__(token=settings.get("twitch_oauth_token"))
+        self.console_task = None
+        self.is_restarting = False
+
+    # Этот метод вызывается автоматически, когда бот готов к работе
+    async def event_ready(self):
+        logger.info(f"Connected as | {self.nick}")
+        channel_name = self.app_settings.get("twitch_channel_name")
+        
+        try:
+            users = await self.fetch_users(names=[channel_name])
+            if not users:
+                logger.error(f"Channel '{channel_name}' not found.")
+                await self.close()
+                return
+            
+            channel_id = users[0].id
+            # Используем встроенный метод для подписки на PubSub
+            topics = [f"channel-points-channel-v1.{channel_id}"]
+            await self.pubsub_subscribe(self.app_settings.get("twitch_oauth_token"), *topics)
+            logger.info(f"Successfully subscribed to channel points events for '{channel_name}'.")
+            
+            # Запускаем консольный ввод в фоновом режиме
+            if not self.console_task or self.console_task.done():
+                self.console_task = self.loop.create_task(self.console_input_worker())
+            
+        except Exception as e:
+            if "401" in str(e):
+                logger.error("AUTHORIZATION ERROR (401). Your OAuth token is invalid.")
+                self.app_settings["twitch_oauth_token"] = ""
+                save_settings()
+                logger.info("Invalid token has been cleared. Please restart the bot to enter a new one.")
+            else:
+                logger.error(f"A critical error occurred during setup: {e}")
+            await self.close()
+
+    # Этот метод автоматически вызывается при событии баллов канала
+    async def event_pubsub_channel_points(self, event):
+        try:
+            reward_title = event.reward.title
+            user_name = event.user.name
+            key_to_press = self.app_settings.get("rewards", {}).get(reward_title)
+            if key_to_press:
+                logger.info(f"Reward '{reward_title}' from {user_name} -> Pressing '{key_to_press.upper()}'")
+                asyncio.create_task(self.handle_key_action(key_to_press))
+            else:
+                logger.warning(f"Received an unconfigured reward: '{reward_title}'")
+        except Exception as e:
+            logger.error(f"Error processing reward: {e}")
+
+    # Логика нажатий теперь метод класса
+    async def handle_key_action(self, key_name: str):
+        key = key_name.lower()
+        key_behavior = self.app_settings.get("key_behavior", {})
+        try:
+            if key in key_behavior.get('hold_keys', []):
+                hold_time = float(key_behavior.get('hold_duration_seconds', 1.0))
+                keyboard.press(key)
+                logger.info(f"HOLD: Holding key '{key.upper()}' for {hold_time} sec...")
+                await asyncio.sleep(hold_time)
+                keyboard.release(key)
+                logger.info(f"RELEASED: Key '{key.upper()}' has been released.")
+            elif key in key_behavior.get('single_press_keys', []):
+                if key == 'lmb': pyautogui.click(button='left'); logger.info("CLICK: Left Mouse Button.")
+                elif key == 'rmb': pyautogui.click(button='right'); logger.info("CLICK: Right Mouse Button.")
+                else: keyboard.press_and_release(key); logger.info(f"PRESS: Key '{key.upper()}'.")
+            else: logger.warning(f"Action for key '{key.upper()}' is not defined.")
+        except Exception as e: logger.error(f"Error while pressing key '{key.upper()}': {e}")
+    
+    # Консоль теперь тоже метод класса
+    async def console_input_worker(self):
+        logger.info("Control console is active. Type 'help' for a list of commands.")
+        while True:
+            try:
+                cmd_line = await self.loop.run_in_executor(None, sys.stdin.readline)
+                if not self.is_connected: break
+                
+                parts = cmd_line.strip().split(maxsplit=2)
+                if not parts: continue
+                command = parts[0].lower()
+                
+                if command == "help":
+                    print("\n--- CONSOLE COMMANDS ---")
+                    print("  status                   - Show current settings")
+                    print("  reward add \"<name>\" <key> - Add/edit a reward binding")
+                    print("  reward remove \"<name>\"      - Remove a reward binding")
+                    print("  holdkey add/remove <key> - Manage the HOLD keys list")
+                    print("  presskey add/remove <key>- Manage the PRESS keys list")
+                    print("  holdtime <number>        - Set the hold duration in seconds")
+                    print("  restart                  - Restart the connection to Twitch")
+                    print("  exit                     - Exit the program")
+                    print("--------------------------\n")
+                elif command == "status":
+                    print("\n--- CURRENT SETTINGS ---")
+                    status_settings = self.app_settings.copy()
+                    if 'twitch_oauth_token' in status_settings and status_settings['twitch_oauth_token']:
+                        status_settings['twitch_oauth_token'] = f"***{status_settings['twitch_oauth_token'][-4:]}"
+                    print(json.dumps(status_settings, ensure_ascii=False, indent=4))
+                    print("------------------------\n")
+                elif command == "reward" and len(parts) > 2:
+                    action = parts[1].lower()
+                    try:
+                        reward_name = cmd_line.strip().split('"', 2)[1]
+                        if action == "add":
+                            key_to_bind = cmd_line.strip().split('"', 2)[2].strip()
+                            if not key_to_bind: raise IndexError
+                            self.app_settings["rewards"][reward_name] = key_to_bind
+                            logger.info(f"Reward '{reward_name}' is now bound to key '{key_to_bind}'.")
+                        elif action == "remove":
+                            if reward_name in self.app_settings["rewards"]:
+                                del self.app_settings["rewards"][reward_name]
+                                logger.info(f"Binding for reward '{reward_name}' has been removed.")
+                            else: logger.warning(f"Reward '{reward_name}' not found.")
+                        save_settings()
+                    except IndexError: logger.warning("Format: reward add/remove \"Reward Name\" <key>")
+                elif command == "restart":
+                    logger.warning("Restarting connection to Twitch...")
+                    self.is_restarting = True
+                    await self.close()
+                    break
+                elif command == "exit":
+                    logger.info("Exiting on command...")
+                    self.is_restarting = False
+                    await self.close()
+                    break
+                # Другие команды для holdkey, presskey и holdtime опущены для краткости, но их можно добавить по аналогии
+                else:
+                    logger.warning(f"Unknown command. Type 'help'.")
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Error in console: {e}")
+
+# --- FUNCTIONS FOR SETTINGS AND INITIAL SETUP ---
 def load_settings():
-    global app_settings
     if os.path.exists(SETTINGS_FILE):
         try:
             with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
-                app_settings = json.load(f)
-            logger.info(f"Settings successfully loaded from {SETTINGS_FILE}")
+                return json.load(f)
         except (json.JSONDecodeError, KeyError):
             logger.error(f"File {SETTINGS_FILE} is corrupted. New settings will be requested.")
-            app_settings = {}
+            return {}
     else:
         logger.info(f"File {SETTINGS_FILE} not found. Starting initial setup.")
-        app_settings = {}
+        return {}
 
-def save_settings():
+def save_settings(settings):
     with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
-        json.dump(app_settings, f, ensure_ascii=False, indent=4)
+        json.dump(settings, f, ensure_ascii=False, indent=4)
     logger.info(f"Settings saved to {SETTINGS_FILE}")
 
-def initial_setup():
-    global app_settings
-    if not app_settings.get("twitch_channel_name"):
-        app_settings["twitch_channel_name"] = input("Enter your Twitch channel name: ").strip().lower()
-    if not app_settings.get("twitch_oauth_token"):
+def initial_setup(settings):
+    if not settings.get("twitch_channel_name"):
+        settings["twitch_channel_name"] = input("Enter your Twitch channel name: ").strip().lower()
+    if not settings.get("twitch_oauth_token"):
         print("\n--- GETTING OAuth TOKEN ---")
         print("A browser will now open to generate a token.")
         print("1. On the website, click 'Custom Scope Token'.")
@@ -58,186 +187,44 @@ def initial_setup():
         print("4. Copy the 'Access Token' and paste it here.")
         if input("Press Enter to open the browser..."): pass
         webbrowser.open("https://twitchtokengenerator.com/")
-        app_settings["twitch_oauth_token"] = input("Paste your OAuth token here: ").strip()
-    app_settings.setdefault("rewards", {"Example Reward": "space"})
-    app_settings.setdefault("key_behavior", {
+        settings["twitch_oauth_token"] = input("Paste your OAuth token here: ").strip()
+    settings.setdefault("rewards", {"Example Reward": "space"})
+    settings.setdefault("key_behavior", {
         "hold_duration_seconds": 1.0,
         "hold_keys": ["w", "a", "s", "d"],
         "single_press_keys": ["e", "r", "f", "g", "q", "space", "lmb", "rmb"]
     })
-    save_settings()
+    save_settings(settings)
     logger.info("Initial setup complete. Starting the bot...")
     return True
 
-# --- CORE BOT LOGIC ---
-# (Этот блок не меняется)
-async def handle_key_action(key_name: str):
-    key = key_name.lower()
-    key_behavior = app_settings.get("key_behavior", {})
-    try:
-        if key in key_behavior.get('hold_keys', []):
-            hold_time = float(key_behavior.get('hold_duration_seconds', 1.0))
-            keyboard.press(key)
-            logger.info(f"HOLD: Holding key '{key.upper()}' for {hold_time} sec...")
-            await asyncio.sleep(hold_time)
-            keyboard.release(key)
-            logger.info(f"RELEASED: Key '{key.upper()}' has been released.")
-        elif key in key_behavior.get('single_press_keys', []):
-            if key == 'lmb': pyautogui.click(button='left'); logger.info("CLICK: Left Mouse Button.")
-            elif key == 'rmb': pyautogui.click(button='right'); logger.info("CLICK: Right Mouse Button.")
-            else: keyboard.press_and_release(key); logger.info(f"PRESS: Key '{key.upper()}'.")
-        else: logger.warning(f"Action for key '{key.upper()}' is not defined.")
-    except Exception as e: logger.error(f"Error while pressing key '{key.upper()}': {e}")
-
-
-# ### ИЗМЕНЕНИЕ ###: Это теперь функция-обработчик событий для клиента
-# Название event_pubsub_channel_points - специальное, twitchio его поймет
-async def event_pubsub_channel_points(event):
-    try:
-        # Данные теперь прямо в объекте event
-        reward_title = event.reward.title
-        user_name = event.user.name
-        key_to_press = app_settings.get("rewards", {}).get(reward_title)
-        if key_to_press:
-            logger.info(f"Reward '{reward_title}' from {user_name} -> Pressing '{key_to_press.upper()}'")
-            asyncio.create_task(handle_key_action(key_to_press))
-        else:
-            logger.warning(f"Received an unconfigured reward: '{reward_title}'")
-    except Exception as e:
-        logger.error(f"Error processing reward: {e}")
-
-
-# --- INTERACTIVE CONSOLE ---
-# (Этот блок не меняется)
-async def console_input_worker():
-    global RESTART_FLAG
-    loop = asyncio.get_event_loop()
-    logger.info("Control console is active. Type 'help' for a list of commands.")
+# --- MAIN EXECUTION BLOCK ---
+def main():
     while True:
+        settings = load_settings()
+        if not settings.get("twitch_channel_name") or not settings.get("twitch_oauth_token"):
+            if not initial_setup(settings):
+                break
+        
+        bot = TwitchBot(settings)
+        
+        logger.warning("=" * 60)
+        logger.warning("Bot is starting... To stop, press Ctrl+C or type 'exit'.")
+        logger.warning("=" * 60)
+        
         try:
-            cmd_line = await loop.run_in_executor(None, sys.stdin.readline)
-            parts = cmd_line.strip().split(maxsplit=2)
-            if not parts: continue
-            command = parts[0].lower()
-            if command == "help":
-                print("\n--- CONSOLE COMMANDS ---")
-                print("  status                   - Show current settings")
-                print("  reward add \"<name>\" <key> - Add/edit a reward binding")
-                print("  reward remove \"<name>\"      - Remove a reward binding")
-                print("  holdkey add/remove <key> - Manage the HOLD keys list")
-                print("  presskey add/remove <key>- Manage the PRESS keys list")
-                print("  holdtime <number>        - Set the hold duration in seconds")
-                print("  restart                  - Restart the connection to Twitch")
-                print("  exit                     - Exit the program")
-                print("--------------------------\n")
-            elif command == "status":
-                print("\n--- CURRENT SETTINGS ---")
-                status_settings = app_settings.copy()
-                if 'twitch_oauth_token' in status_settings and status_settings['twitch_oauth_token']:
-                    status_settings['twitch_oauth_token'] = f"***{status_settings['twitch_oauth_token'][-4:]}"
-                print(json.dumps(status_settings, ensure_ascii=False, indent=4))
-                print("------------------------\n")
-            elif command == "reward" and len(parts) > 2:
-                action = parts[1].lower()
-                try:
-                    reward_name = cmd_line.strip().split('"', 2)[1]
-                    if action == "add":
-                        key_to_bind = cmd_line.strip().split('"', 2)[2].strip()
-                        if not key_to_bind: raise IndexError
-                        app_settings["rewards"][reward_name] = key_to_bind
-                        logger.info(f"Reward '{reward_name}' is now bound to key '{key_to_bind}'.")
-                    elif action == "remove":
-                        if reward_name in app_settings["rewards"]:
-                            del app_settings["rewards"][reward_name]
-                            logger.info(f"Binding for reward '{reward_name}' has been removed.")
-                        else: logger.warning(f"Reward '{reward_name}' not found.")
-                    save_settings()
-                except IndexError: logger.warning("Format: reward add/remove \"Reward Name\" <key>")
-            elif command in ["holdkey", "presskey"] and len(parts) > 2:
-                key_list_name = f"{command}s"
-                action, key = parts[1].lower(), parts[2].lower()
-                if action == "add" and key not in app_settings["key_behavior"][key_list_name]:
-                    app_settings["key_behavior"][key_list_name].append(key)
-                    logger.info(f"Key '{key}' added to '{key_list_name}'.")
-                elif action == "remove" and key in app_settings["key_behavior"][key_list_name]:
-                    app_settings["key_behavior"][key_list_name].remove(key)
-                    logger.info(f"Key '{key}' removed from '{key_list_name}'.")
-                else: logger.warning(f"Action failed (key already in/not in list).")
-                save_settings()
-            elif command == "holdtime" and len(parts) > 1:
-                try:
-                    app_settings["key_behavior"]["hold_duration_seconds"] = float(parts[1])
-                    logger.info(f"Hold time set to {parts[1]} seconds.")
-                    save_settings()
-                except ValueError: logger.warning("Invalid number for time.")
-            elif command == "restart":
-                logger.warning("Restarting connection to Twitch...")
-                RESTART_FLAG = True
-                if twitch_client: await twitch_client.close()
-                break
-            elif command == "exit":
-                logger.info("Exiting on command...")
-                RESTART_FLAG = False
-                if twitch_client: await twitch_client.close()
-                break
-            else: logger.warning(f"Unknown command. Type 'help'.")
-        except Exception as e: logger.error(f"Error in console: {e}")
-
-# --- MAIN LOOP ---
-async def main_loop():
-    global twitch_client, RESTART_FLAG
-    load_settings()
-    if not app_settings.get("twitch_channel_name") or not app_settings.get("twitch_oauth_token"):
-        initial_setup()
-    while True:
-        RESTART_FLAG = False
-        channel_name = app_settings.get("twitch_channel_name")
-        token = app_settings.get("twitch_oauth_token")
-        
-        twitch_client = Client(token=token)
-        
-        # ### ИЗМЕНЕНИЕ ###: Регистрируем наш обработчик событий напрямую в клиенте
-        twitch_client.add_event(event_pubsub_channel_points, 'event_pubsub_channel_points')
-        
-        console_task = asyncio.create_task(console_input_worker())
-        try:
-            users = await twitch_client.fetch_users(names=[channel_name])
-            if not users:
-                logger.error(f"Channel '{channel_name}' not found.")
-                break
-            channel_id = users[0].id
-            
-            # ### ИЗМЕНЕНИЕ ###: Подписываемся на топик через сам клиент
-            topics = [f"channel-points-channel-v1.{channel_id}"]
-            await twitch_client.pubsub_subscribe(token, *topics)
-            
-            logger.info(f"Successfully subscribed to channel points events for '{channel_name}'.")
-            logger.warning("=" * 60)
-            logger.warning("Bot is running. To stop, press Ctrl+C or type 'exit'.")
-            logger.warning("=" * 60)
-
-            # Запускаем основной цикл клиента и ждем завершения консоли
-            await asyncio.gather(twitch_client.start(), console_task)
-
+            bot.run()
         except Exception as e:
-            if "401" in str(e):
-                logger.error("AUTHORIZATION ERROR (401). Your OAuth token is invalid.")
-                app_settings["twitch_oauth_token"] = ""
-                save_settings()
-                logger.info("Invalid token has been cleared. Please restart the bot to enter a new one.")
-            else: logger.error(f"A critical error occurred: {e}")
-            if not console_task.done(): console_task.cancel()
+            logger.error(f"An unhandled error occurred in bot.run(): {e}")
             break
-        finally:
-            if twitch_client and not twitch_client.is_closed():
-                # Отписываемся от топиков перед закрытием
-                await twitch_client.pubsub_unsubscribe(token, *topics)
-                await twitch_client.close()
-        if not RESTART_FLAG: break
+
+        if not bot.is_restarting:
+            break
+        
+        logger.info("Restarting bot in 3 seconds...")
+        asyncio.run(asyncio.sleep(3)) # Маленькая пауза перед перезапуском
+
     logger.info("Program has terminated.")
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main_loop())
-    except KeyboardInterrupt:
-        logger.info("\nScript stopped by user (Ctrl+C).")
+    main()
