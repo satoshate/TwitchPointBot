@@ -6,7 +6,7 @@ import sys
 import uuid
 import pyautogui
 import keyboard
-from twitchio.ext import pubsub
+from twitchio.ext import pubsub # Теперь импортируем только pubsub
 from twitchio.client import Client
 
 # --- КОНФИГУРАЦИЯ ---
@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 app_settings = {}
 twitch_client = None
 
-# --- ФУНКЦИИ УПРАВЛЕНИЯ НАСТРОЙКАМИ ---
+# --- ФУНКЦИИ УПРАВЛЕНИЯ НАСТРОЙКАМИ (Без изменений) ---
 def load_or_create_settings():
     """Загружает настройки из файла или создает его, если он не существует."""
     global app_settings
@@ -59,7 +59,7 @@ def load_or_create_settings():
         logger.info(f"Создан файл {SETTINGS_FILE}. Пожалуйста, отредактируйте его и перезапустите бота.")
         return False
 
-# --- ОСНОВНАЯ ЛОГИКА БОТА ---
+# --- ОСНОВНАЯ ЛОГИКА БОТА (Без изменений) ---
 async def handle_key_action(key_name: str):
     """Обрабатывает нажатие клавиши в соответствии с настройками."""
     key = key_name.lower()
@@ -90,20 +90,26 @@ async def handle_key_action(key_name: str):
     except Exception as e:
         logger.error(f"Ошибка при попытке нажать '{key.upper()}': {e}")
 
-@pubsub.pubsub_callback(pubsub.Topic.channel_points_v1)
-async def on_channel_points(uuid: uuid.UUID, data: pubsub.PubSubChannelPointsMessage):
+
+### ИЗМЕНЕНИЕ ###: Убрали декоратор @pubsub.pubsub_callback
+# Теперь это обычная функция, которую мы зарегистрируем вручную.
+async def on_channel_points(data: pubsub.PubSubChannelPointsMessage):
     """Эта функция вызывается, когда кто-то активирует награду за баллы канала."""
-    reward_title = data.reward.title
-    user_name = data.user.name
-    logger.info(f"ПОЛУЧЕНА НАГРАДА! Пользователь: {user_name}, Награда: '{reward_title}'")
+    try:
+        reward_title = data.reward.title
+        user_name = data.user.name
+        logger.info(f"ПОЛУЧЕНА НАГРАДА! Пользователь: {user_name}, Награда: '{reward_title}'")
 
-    key_to_press = app_settings.get("rewards", {}).get(reward_title)
+        key_to_press = app_settings.get("rewards", {}).get(reward_title)
 
-    if key_to_press:
-        logger.info(f"Награда '{reward_title}' найдена в настройках. Действие: нажать '{key_to_press.upper()}'")
-        asyncio.create_task(handle_key_action(key_to_press))
-    else:
-        logger.warning(f"Для награды '{reward_title}' не настроено действие в {SETTINGS_FILE}")
+        if key_to_press:
+            logger.info(f"Награда '{reward_title}' найдена в настройках. Действие: нажать '{key_to_press.upper()}'")
+            asyncio.create_task(handle_key_action(key_to_press))
+        else:
+            logger.warning(f"Для награды '{reward_title}' не настроено действие в {SETTINGS_FILE}")
+    except Exception as e:
+        logger.error(f"Ошибка при обработке награды: {e}")
+
 
 async def run_bot():
     """Основная функция запуска и подключения бота."""
@@ -115,21 +121,28 @@ async def run_bot():
     if not channel_name or "your_channel_name" in channel_name or not token or "paste_your_oauth_token" in token:
         logger.error("Имя канала или OAuth токен не указаны в bot_settings.json!")
         logger.error("Пожалуйста, заполните файл настроек и перезапустите бота.")
+        input("Нажмите Enter для выхода...") # ### ИЗМЕНЕНИЕ ###: Добавил input для ожидания
         return
 
     twitch_client = Client(token=token)
     pubsub_service = pubsub.PubSub(twitch_client)
+    
+    ### ИЗМЕНЕНИЕ ###: Вот новый способ регистрации функции-обработчика
     pubsub_service.register_callback(pubsub.Topic.channel_points_v1, on_channel_points)
 
     try:
         users = await twitch_client.fetch_users(names=[channel_name])
         if not users:
             logger.error(f"Не удалось найти пользователя с ником '{channel_name}'. Проверьте имя канала в настройках.")
+            input("Нажмите Enter для выхода...") # ### ИЗМЕНЕНИЕ ###: Добавил input для ожидания
             return
         
         channel_id = users[0].id
-        topics = [pubsub.Topic.channel_points_v1(channel_id)]
+        
+        ### ИЗМЕНЕНИЕ ###: Новый способ подписки на топик
+        topics = [pubsub.Topic(channel_id, "channel-points-channel-v1", token)]
         await pubsub_service.subscribe_topics(topics)
+        
         logger.info(f"Успешно подписан на события баллов канала '{channel_name}' (ID: {channel_id}).")
         
         logger.warning("=" * 60)
@@ -145,8 +158,10 @@ async def run_bot():
              logger.error("ОШИБКА АВТОРИЗАЦИИ (401). Ваш OAuth токен недействителен или не имеет прав 'channel:read:redemptions'.")
         else:
              logger.error(f"Произошла критическая ошибка при подключении к Twitch: {e}")
+        input("Нажмите Enter для выхода...") # ### ИЗМЕНЕНИЕ ###: Добавил input для ожидания
     finally:
         if twitch_client:
+            await pubsub_service.unsubscribe_topics(topics)
             await twitch_client.close()
             logger.info("Соединение с Twitch закрыто.")
 
