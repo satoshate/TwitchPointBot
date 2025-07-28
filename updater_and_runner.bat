@@ -2,10 +2,7 @@
 :: =================================================================
 :: 0. Настройка шрифта и кодировки для корректного отображения кириллицы
 :: =================================================================
-:: Устанавливаем UTF-8
 chcp 65001 >nul
-:: С помощью PowerShell меняем шрифт текущего окна консоли на Lucida Console
-:: Это нужно, чтобы русские буквы не превращались в "??????" после смены кодировки.
 powershell -Command "$H = Get-Host; $H.UI.RawUI.WindowTitle = 'Twitch Channel Points Bot'; $C = $H.PrivateData; $C.ConsolePane.FontName = 'Lucida Console'"
 title Twitch Channel Points Bot [Auto-Updater v3]
 
@@ -36,7 +33,6 @@ echo [UPDATE] Принудительно скачиваю последнюю в�
 powershell -Command "try { Invoke-WebRequest -Uri %SCRIPT_URL% -OutFile twitch_key_bot.py } catch { Write-Host '[ERROR] Не удалось скачать twitch_key_bot.py'; exit 1 }"
 if %errorlevel% neq 0 ( pause & exit )
 
-:: Сравниваем файл зависимостей, чтобы не переустанавливать без нужды
 powershell -Command "try { Invoke-WebRequest -Uri %REQS_URL% -OutFile requirements.txt.new } catch {}"
 if exist "requirements.txt" (
     fc /b "requirements.txt" "requirements.txt.new" > nul
@@ -49,7 +45,7 @@ if exist "requirements.txt" (
         del "requirements.txt.new"
     )
 ) else (
-    ren "requirements.txt.new" "requirements.txt"
+    if exist "requirements.txt.new" ( ren "requirements.txt.new" "requirements.txt" )
 )
 
 echo [UPDATE] Файлы успешно обновлены/проверены.
@@ -62,9 +58,7 @@ if not exist ".venv\Scripts\activate.bat" (
     echo [VENV] Виртуальное окружение не найдено. Создаю...
     python -m venv .venv
     if %errorlevel% neq 0 (
-        echo [ERROR] Не удалось создать виртуальное окружение. Убедитесь, что Python установлен.
-        pause
-        exit
+        echo [ERROR] Не удалось создать .venv & pause & exit
     )
     echo [VENV] Виртуальное окружение успешно создано.
     if exist ".installed_flag" del ".installed_flag"
@@ -80,9 +74,7 @@ if not exist ".installed_flag" (
     echo [SETUP] Устанавливаю/обновляю библиотеки в .venv...
     pip install -r requirements.txt
     if %errorlevel% neq 0 (
-        echo [ERROR] Не удалось установить библиотеки.
-        pause
-        exit
+        echo [ERROR] Не удалось установить библиотеки. & pause & exit
     )
     echo [SETUP] Библиотеки успешно установлены.
     echo 1 > .installed_flag
