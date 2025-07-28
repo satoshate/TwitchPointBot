@@ -1,35 +1,13 @@
 {
-    "twitch_channel_name": "your_channel_name_here",
-    "twitch_oauth_token": "paste_your_oauth_token_from_twitchtokengenerator_here",
-    "rewards": {
-        "Бежать вперед (1 сек)": "w",
-        "Сделать шаг влево": "a",
-        "Сделать шаг вправо": "d",
-        "Шаг назад": "s",
-        "Использовать/Открыть (E)": "e",
-        "Перезарядка (R)": "r",
-        "Бросить гранату": "g",
-        "Выстрел": "lmb",
-        "Прицелиться": "rmb",
-        "Прыжок": "space"
-    },
-    "key_behavior": {
-        "hold_duration_seconds": 1.0,
-        "hold_keys": [
-            "w",
-            "a",
-            "s",
-            "d"
-        ],
-        "single_press_keys": [
-            "e",
-            "r",
-            "f",
-            "g",
-            "q",
-            "space",
-            "lmb",
-            "rmb"
-        ]
-    }
+  "twitch_channel_name": "misokuta_yuki",
+  "twitch_client_id": "ВАШ_CLIENT_ID",
+  "twitch_oauth_token": "oauth:ВАШ_USER_TOKEN",
+  "rewards": {
+    "Example Reward": "space"
+  },
+  "key_behavior": {
+    "hold_duration_seconds": 1.0,
+    "hold_keys": ["w","a","s","d"],
+    "single_press_keys": ["e","r","f","g","q","space","lmb","rmb"]
+  }
 }
