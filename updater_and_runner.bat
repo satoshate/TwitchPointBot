@@ -3,9 +3,8 @@ chcp 65001 >nul
 title Twitch Channel Points Bot [Auto-Updater]
 
 :: =================================================================
-:: 1. НАСТРОЙКА: УКАЖИТЕ ПРЯМЫЕ ССЫЛКИ НА ВАШИ ФАЙЛЫ НА GITHUB
+:: 1. НАСТРОЙКА: ПРЯМЫЕ ССЫЛКИ НА GITHUB
 :: =================================================================
-:: Как получить ссылку: зайдите на GitHub, откройте файл, нажмите кнопку "Raw". Скопируйте URL из адресной строки.
 SET SCRIPT_URL="https://raw.githubusercontent.com/satoshate/TwitchPointBot/refs/heads/main/twitch_key_bot.py"
 SET REQS_URL="https://raw.githubusercontent.com/satoshate/TwitchPointBot/refs/heads/main/requirements.txt"
 
@@ -22,66 +21,58 @@ if %errorlevel% neq 0 (
 echo [OK] Скрипт запущен с правами Администратора.
 
 :: =================================================================
-:: 3. СКАЧИВАНИЕ И ПРОВЕРКА ОБНОВЛЕНИЙ
+:: 3. СКАЧИВАНИЕ И ПРОВЕРКА ОБНОВЛЕНИЙ (Код без изменений)
 :: =================================================================
 echo.
 echo [UPDATE] Проверяю наличие обновлений...
-
-:: Скачиваем последнюю версию скрипта и файла зависимостей
-echo [UPDATE] Скачиваю twitch_key_bot.py...
-curl -s -L %SCRIPT_URL% -o twitch_key_bot.py.new
+curl -s -L %SCRIPT_URL% -o twitch_key_bot.py.new && curl -s -L %REQS_URL% -o requirements.txt.new
 if %errorlevel% neq 0 (
-    echo [WARN] curl не сработал. Пробую через PowerShell...
     powershell -Command "try { Invoke-WebRequest -Uri %SCRIPT_URL% -OutFile twitch_key_bot.py.new } catch {}"
-)
-
-echo [UPDATE] Скачиваю requirements.txt...
-curl -s -L %REQS_URL% -o requirements.txt.new
-if %errorlevel% neq 0 (
-    echo [WARN] curl не сработал. Пробую через PowerShell...
     powershell -Command "try { Invoke-WebRequest -Uri %REQS_URL% -OutFile requirements.txt.new } catch {}"
 )
-
-:: Проверяем, существует ли локальный файл. Если нет, то это первый запуск.
-if not exist "twitch_key_bot.py" (
-    echo [UPDATE] Локальный скрипт не найден. Устанавливаю скачанную версию.
-    ren twitch_key_bot.py.new twitch_key_bot.py
-) else (
-    :: Сравниваем файлы. fc /b - бинарное сравнение.
-    fc /b "twitch_key_bot.py" "twitch_key_bot.py.new" > nul
-    if %errorlevel%==0 (
-        echo [UPDATE] Скрипт twitch_key_bot.py уже последней версии.
-        del "twitch_key_bot.py.new"
-    ) else (
-        echo [UPDATE] !!! Обнаружена новая версия twitch_key_bot.py! Обновляю...
-        del "twitch_key_bot.py"
-        ren "twitch_key_bot.py.new" "twitch_key_bot.py"
-        echo [UPDATE] Скрипт успешно обновлен.
-    )
-)
-
-:: Делаем то же самое для requirements.txt
-if not exist "requirements.txt" (
-    ren requirements.txt.new requirements.txt
-) else (
-    fc /b "requirements.txt" "requirements.txt.new" > nul
-    if %errorlevel%==0 (
-        del "requirements.txt.new"
-    ) else (
-        echo [UPDATE] !!! Обнаружены изменения в requirements.txt! Обновляю...
-        del "requirements.txt"
-        ren "requirements.txt.new" "requirements.txt"
-        echo [UPDATE] Файл зависимостей обновлен. Сбрасываю флаг установки.
-        if exist ".installed_flag" del ".installed_flag"
-    )
-)
+if not exist "twitch_key_bot.py" ( ren twitch_key_bot.py.new twitch_key_bot.py ) else ( fc /b "twitch_key_bot.py" "twitch_key_bot.py.new" > nul || (del "twitch_key_bot.py" && ren "twitch_key_bot.py.new" "twitch_key_bot.py" && echo [UPDATE] Скрипт обновлен.) )
+if not exist "requirements.txt" ( ren requirements.txt.new requirements.txt ) else ( fc /b "requirements.txt" "requirements.txt.new" > nul || (del "requirements.txt" && ren "requirements.txt.new" "requirements.txt" && echo [UPDATE] Файл зависимостей обновлен. && if exist ".installed_flag" del ".installed_flag") )
+if exist "*.new" del "*.new"
+echo [UPDATE] Проверка завершена.
 
 :: =================================================================
-:: 4. Установка зависимостей (если нужно)
+:: 4. РАБОТА С ВИРТУАЛЬНЫМ ОКРУЖЕНИЕМ (VENV) - НОВЫЙ БЛОК
+:: =================================================================
+echo.
+:: Проверяем, существует ли папка виртуального окружения
+if not exist ".venv\Scripts\activate.bat" (
+    echo [VENV] Виртуальное окружение не найдено. Создаю...
+    
+    :: Проверяем наличие Python
+    python --version >nul 2>&1
+    if %errorlevel% neq 0 (
+        echo [ERROR] Python не найден! Пожалуйста, установите Python с сайта python.org
+        echo [INFO] При установке обязательно поставьте галочку "Add Python to PATH".
+        pause
+        exit
+    )
+    
+    python -m venv .venv
+    if %errorlevel% neq 0 (
+        echo [ERROR] Не удалось создать виртуальное окружение.
+        pause
+        exit
+    )
+    echo [VENV] Виртуальное окружение успешно создано.
+    :: Принудительно сбрасываем флаг установки, чтобы библиотеки установились в новое окружение
+    if exist ".installed_flag" del ".installed_flag"
+)
+
+:: Активируем виртуальное окружение. Все последующие команды (pip, python) будут выполняться в нем.
+echo [VENV] Активирую виртуальное окружение...
+call .venv\Scripts\activate.bat
+
+:: =================================================================
+:: 5. Установка зависимостей (теперь внутри VENV)
 :: =================================================================
 echo.
 if not exist ".installed_flag" (
-    echo [SETUP] Устанавливаю/обновляю библиотеки...
+    echo [SETUP] Устанавливаю/обновляю библиотеки в .venv...
     pip install -r requirements.txt
     if %errorlevel% neq 0 (
         echo [ERROR] Не удалось установить библиотеки.
@@ -91,11 +82,11 @@ if not exist ".installed_flag" (
     echo [SETUP] Библиотеки успешно установлены.
     echo 1 > .installed_flag
 ) else (
-    echo [SETUP] Библиотеки уже установлены.
+    echo [SETUP] Библиотеки уже установлены в .venv.
 )
 
 :: =================================================================
-:: 5. Запуск бота
+:: 6. Запуск бота (теперь внутри VENV)
 :: =================================================================
 echo.
 echo [START] Запускаю бота...
