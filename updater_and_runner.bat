@@ -1,82 +1,79 @@
 @echo off
-chcp 65001 >nul
 title Twitch Channel Points Bot [Auto-Updater]
 
 :: =================================================================
-:: 1. НАСТРОЙКА: ПРЯМЫЕ ССЫЛКИ НА GITHUB
+:: 1. GITHUB DIRECT-DOWNLOAD LINKS
 :: =================================================================
 SET SCRIPT_URL="https://raw.githubusercontent.com/satoshate/TwitchPointBot/main/twitch_key_bot.py"
 SET REQS_URL="https://raw.githubusercontent.com/satoshate/TwitchPointBot/main/requirements.txt"
 
 :: =================================================================
-:: 2. Общие настройки и проверка прав
+:: 2. Check for Administrator privileges
 :: =================================================================
 cd /d "%~dp0"
 net session >nul 2>&1
 if %errorlevel% neq 0 (
-    echo [INFO] Запрашиваю права Администратора...
+    echo [INFO] Requesting Administrator privileges...
     powershell -Command "Start-Process -FilePath '%0' -Verb RunAs"
     exit
 )
-echo [OK] Скрипт запущен с правами Администратора.
+echo [OK] Script is running with Administrator privileges.
 
 :: =================================================================
-:: 3. СКАЧИВАНИЕ ОБНОВЛЕНИЙ
+:: 3. Force-download latest versions
 :: =================================================================
 echo.
-echo [UPDATE] Принудительно скачиваю последнюю версию скрипта...
-powershell -Command "try { Invoke-WebRequest -Uri %SCRIPT_URL% -OutFile twitch_key_bot.py } catch { Write-Host '[ERROR] Не удалось скачать twitch_key_bot.py'; exit 1 }"
+echo [UPDATE] Forcibly downloading the latest script version...
+powershell -Command "try { Invoke-WebRequest -Uri %SCRIPT_URL% -OutFile twitch_key_bot.py } catch { Write-Host '[ERROR] Failed to download twitch_key_bot.py'; exit 1 }"
 if %errorlevel% neq 0 ( pause & exit )
 powershell -Command "try { Invoke-WebRequest -Uri %REQS_URL% -OutFile requirements.txt.new } catch {}"
 if exist "requirements.txt" (
     fc /b "requirements.txt" "requirements.txt.new" > nul
     if %errorlevel% neq 0 (
-        echo [UPDATE] Обнаружены изменения в requirements.txt.
+        echo [UPDATE] Changes detected in requirements.txt. Re-installing.
         del "requirements.txt" & ren "requirements.txt.new" "requirements.txt" & if exist ".installed_flag" del ".installed_flag"
     ) else ( del "requirements.txt.new" )
 ) else (
     if exist "requirements.txt.new" ( ren "requirements.txt.new" "requirements.txt" )
 )
-echo [UPDATE] Файлы успешно обновлены/проверены.
-
+echo [UPDATE] Files updated/checked successfully.
 
 :: =================================================================
-:: 4. РАБОТА С ВИРТУАЛЬНЫМ ОКРУЖЕНИЕМ (VENV)
+:: 4. VENV (Virtual Environment) setup
 :: =================================================================
 echo.
 if not exist ".venv\Scripts\activate.bat" (
-    echo [VENV] Виртуальное окружение не найдено. Создаю...
+    echo [VENV] Virtual environment not found. Creating...
     python -m venv .venv
-    if %errorlevel% neq 0 ( echo [ERROR] Не удалось создать .venv & pause & exit )
-    echo [VENV] Виртуальное окружение успешно создано.
+    if %errorlevel% neq 0 ( echo [ERROR] Failed to create .venv. Make sure Python is installed. & pause & exit )
+    echo [VENV] Virtual environment created successfully.
     if exist ".installed_flag" del ".installed_flag"
 )
-echo [VENV] Активирую виртуальное окружение...
+echo [VENV] Activating virtual environment...
 call .venv\Scripts\activate.bat
 
 :: =================================================================
-:: 5. Установка зависимостей (если нужно)
+:: 5. Install dependencies (if needed)
 :: =================================================================
 echo.
 if not exist ".installed_flag" (
-    echo [SETUP] Устанавливаю/обновляю библиотеки в .venv...
+    echo [SETUP] Installing/updating libraries in .venv...
     pip install -r requirements.txt
-    if %errorlevel% neq 0 ( echo [ERROR] Не удалось установить библиотеки. & pause & exit )
-    echo [SETUP] Библиотеки успешно установлены.
+    if %errorlevel% neq 0 ( echo [ERROR] Failed to install libraries. & pause & exit )
+    echo [SETUP] Libraries installed successfully.
     echo 1 > .installed_flag
 ) else (
-    echo [SETUP] Библиотеки уже установлены в .venv.
+    echo [SETUP] Libraries are already installed in .venv.
 )
 
 :: =================================================================
-:: 6. Запуск бота
+:: 6. Run the bot
 :: =================================================================
 echo.
-echo [START] Запускаю бота...
+echo [START] Starting the bot...
 echo.
-:: ### КЛЮЧЕВОЕ ИЗМЕНЕНИЕ ### Добавляем флаг -X utf8, чтобы Python принудительно использовал UTF-8
-python -X utf8 "%~dp0\twitch_key_bot.py"
+python "%~dp0\twitch_key_bot.py"
 
 echo.
-echo [INFO] Бот завершил работу. Нажмите любую клавишу для закрытия окна.
+echo [INFO] Bot has finished. Press any key to close this window.
 pause >nul
