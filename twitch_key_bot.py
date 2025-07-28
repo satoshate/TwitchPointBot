@@ -188,8 +188,7 @@ async def main_loop():
         channel_name = app_settings.get("twitch_channel_name")
         token = app_settings.get("twitch_oauth_token")
         
-        # This is the corrected line
-        twitch_client = Client(token=token) 
+        twitch_client = Client(token=token) # The corrected line
         
         pubsub_pool = PubSubPool(twitch_client)
         topic_str = "channel-points-channel-v1"
@@ -200,7 +199,6 @@ async def main_loop():
                 logger.error(f"Channel '{channel_name}' not found.")
                 break
             channel_id = users[0].id
-            # The token is not needed here for this library version
             await pubsub_pool.subscribe_topic(f"{topic_str}.{channel_id}", on_channel_points)
             logger.info(f"Successfully subscribed to channel points events for '{channel_name}'.")
             logger.warning("=" * 60)
