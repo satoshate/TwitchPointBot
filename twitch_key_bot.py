@@ -24,28 +24,35 @@ class TwitchBot(Client):
     def __init__(self, settings):
         self.app_settings = settings
         token = settings.get("twitch_oauth_token", "")
-        # ### ИЗМЕНЕНИЕ ###: Автоматически добавляем префикс oauth:
+        # Автоматически добавляем префикс oauth:, если его нет
         if token and not token.startswith("oauth:"):
             token = f"oauth:{token}"
         
-        # ### ИЗМЕНЕНИЕ ###: Инициализируем клиент с client_id и initial_channels
+        # ### ФИНАЛЬНОЕ ИСПРАВЛЕНИЕ ###
+        # Убираем client_id, так как twitchio.Client его не принимает
         super().__init__(
             token=token,
-            client_id=settings.get("twitch_client_id"),
             initial_channels=[settings.get("twitch_channel_name")]
         )
         self.console_task = None
         self.is_restarting = False
 
     async def event_ready(self):
-        logger.info(f"Connected as | {self.nick}")
+        logger.info(f"Connected to Twitch chat as | {self.nick}")
         channel_name = self.app_settings.get("twitch_channel_name")
         
         try:
             users = await self.fetch_users(names=[channel_name])
+            if not users:
+                logger.error(f"Channel '{channel_name}' not found.")
+                await self.close()
+                return
+            
             channel_id = users[0].id
+            # Используем токен без префикса для PubSub
+            pubsub_token = self.app_settings.get("twitch_oauth_token", "")
             topics = [f"channel-points-channel-v1.{channel_id}"]
-            await self.pubsub_subscribe(self.app_settings.get("twitch_oauth_token"), *topics)
+            await self.pubsub_subscribe(pubsub_token, *topics)
             logger.info(f"Successfully subscribed to channel points events for '{channel_name}'.")
             
             if not self.console_task or self.console_task.done():
@@ -56,6 +63,7 @@ class TwitchBot(Client):
             await self.close()
 
     async def event_pubsub_channel_points(self, event):
+        # ... (этот метод без изменений)
         try:
             reward_title = event.reward.title
             user_name = event.user.name
@@ -104,7 +112,7 @@ class TwitchBot(Client):
                     self.is_restarting = False
                     await self.close()
                     break
-                # ... (остальные команды help, status, reward и т.д.)
+                # ... (остальные команды)
             except asyncio.CancelledError: break
             except Exception as e: logger.error(f"Error in console: {e}")
 
@@ -122,15 +130,9 @@ def save_settings(settings):
     logger.info(f"Settings saved to {SETTINGS_FILE}")
 
 def initial_setup(settings):
+    # ### ФИНАЛЬНОЕ ИСПРАВЛЕНИЕ ###: Убираем запрос Client ID
     if not settings.get("twitch_channel_name"):
         settings["twitch_channel_name"] = input("Enter your Twitch channel name: ").strip().lower()
-    
-    # ### ИЗМЕНЕНИЕ ###: Добавляем запрос Client ID
-    if not settings.get("twitch_client_id"):
-        print("\n--- GETTING Client ID ---")
-        print("Go to your Twitch Developer Console (dev.twitch.tv/console/apps).")
-        print("Register a new application (or use an existing one).")
-        settings["twitch_client_id"] = input("Paste your Client ID here: ").strip()
 
     if not settings.get("twitch_oauth_token"):
         print("\n--- GETTING OAuth TOKEN ---")
@@ -138,41 +140,43 @@ def initial_setup(settings):
         print("1. On the website, click 'Custom Scope Token'.")
         print("2. Check the ONE box next to 'channel:read:redemptions'.")
         print("3. Click 'Generate Token!' and authorize.")
-        print("4. Copy the 'Access Token' (NOT including 'oauth:').")
+        print("4. Copy the 'Access Token' (the long string of characters).")
         if input("Press Enter to open the browser..."): pass
         webbrowser.open("https://twitchtokengenerator.com/")
         settings["twitch_oauth_token"] = input("Paste your OAuth token here: ").strip()
         
     settings.setdefault("rewards", {"Example Reward": "space"})
-    settings.setdefault("key_behavior", {}) # остальное по аналогии
+    settings.setdefault("key_behavior", {})
     save_settings(settings)
     logger.info("Initial setup complete. Starting the bot...")
     return True
 
 # --- MAIN EXECUTION BLOCK ---
 def main():
-    # ... (этот блок без изменений)
     while True:
         settings = load_settings()
-        if not all(k in settings for k in ["twitch_channel_name", "twitch_oauth_token", "twitch_client_id"]):
+        if not all(k in settings for k in ["twitch_channel_name", "twitch_oauth_token"]):
             if not initial_setup(settings): break
         
         bot = TwitchBot(settings)
         
         logger.warning("=" * 60); logger.warning("Bot is starting..."); logger.warning("=" * 60)
         
-        try: bot.run()
+        try:
+            bot.run()
         except Exception as e:
-            if "Login unsuccessful" in str(e):
-                logger.error("AUTHORIZATION FAILED. Please check your token and Client ID.")
+            # Улучшаем обработку ошибки авторизации
+            if "Login unsuccessful" in str(e) or "401" in str(e):
+                logger.error("AUTHORIZATION FAILED. The token is likely invalid or expired.")
                 settings["twitch_oauth_token"] = "" # Сбрасываем токен, чтобы запросить заново
                 save_settings(settings)
-                logger.info("Invalid token has been cleared. Restart the bot.")
+                logger.info("Invalid token has been cleared. Please restart the bot to enter a new one.")
             else:
                 logger.error(f"An unhandled error occurred: {e}")
             break
 
-        if not bot.is_restarting: break
+        if not bot.is_restarting:
+            break
         logger.info("Restarting bot in 3 seconds..."); asyncio.run(asyncio.sleep(3))
 
     logger.info("Program has terminated.")
