@@ -19,7 +19,6 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)]
 )
 logger = logging.getLogger(__name__)
-RESTART_FLAG = False
 
 # --- SETTINGS MANAGEMENT ---
 def load_settings():
@@ -44,13 +43,10 @@ def initial_setup(settings):
         settings["twitch_client_id"] = input("Paste your Client ID here: ").strip()
     if not settings.get("twitch_oauth_token"):
         print("\n--- GETTING OAuth TOKEN ---")
-        print("A browser will now open. On the website:")
-        print("1. Click 'Custom Scope Token'.")
-        print("2. Check TWO boxes: 'channel:read:redemptions' AND 'user:read:broadcast'.")
-        print("3. Click 'Generate Token!' and authorize.")
-        input("Press Enter to open the browser...")
-        webbrowser.open("https://twitchtokengenerator.com/")
-        settings["twitch_oauth_token"] = input("Paste your OAuth token here: ").strip()
+        print("Please generate a token manually using the special URL method.")
+        print("See documentation for instructions.")
+        settings["twitch_oauth_token"] = input("Paste your manually generated OAuth token here: ").strip()
+        
     settings.setdefault("rewards", {"Example Reward": "space"})
     settings.setdefault("key_behavior", {
         "hold_duration_seconds": 1.0,
@@ -63,6 +59,7 @@ def initial_setup(settings):
 
 # --- CORE LOGIC ---
 async def handle_key_action(key_name: str, settings: dict):
+    # ... (без изменений)
     key = key_name.lower()
     key_behavior = settings.get("key_behavior", {})
     try:
@@ -78,6 +75,7 @@ async def handle_key_action(key_name: str, settings: dict):
     except Exception as e: logger.error(f"Error while pressing key '{key.upper()}': {e}")
 
 async def handle_redemption_event(event: dict, settings: dict):
+    # ... (без изменений)
     try:
         reward_title = event.get("reward", {}).get("title")
         user_name = event.get("user_name")
@@ -91,13 +89,13 @@ async def handle_redemption_event(event: dict, settings: dict):
         logger.error(f"Error processing reward: {e}")
 
 async def subscribe_to_events(session_id: str, settings: dict):
+    # ... (без изменений)
     token = settings['twitch_oauth_token']
     headers = {
         "Client-ID": settings["twitch_client_id"],
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json"
     }
-    # 1. Get broadcaster ID
     async with aiohttp.ClientSession() as session:
         async with session.get(f"https://api.twitch.tv/helix/users?login={settings['twitch_channel_name']}", headers=headers) as resp:
             if resp.status != 200:
@@ -110,7 +108,6 @@ async def subscribe_to_events(session_id: str, settings: dict):
             broadcaster_id = data["data"][0]["id"]
             logger.info(f"Got Broadcaster ID: {broadcaster_id}")
 
-    # 2. Create EventSub subscription
     body = {
         "type": "channel.channel_points_custom_reward_redemption.add",
         "version": "1",
@@ -126,6 +123,7 @@ async def subscribe_to_events(session_id: str, settings: dict):
             return True
 
 async def listen_to_eventsub(settings: dict):
+    # ... (без изменений)
     ws_url = "wss://eventsub.wss.twitch.tv/ws"
     async with websockets.connect(ws_url, ping_interval=20, ping_timeout=20) as ws:
         logger.info("Connected to EventSub WebSocket.")
@@ -137,12 +135,12 @@ async def listen_to_eventsub(settings: dict):
                 session_id = data["payload"]["session"]["id"]
                 logger.info(f"Session established: {session_id}")
                 if not await subscribe_to_events(session_id, settings):
-                    break # Exit if subscription failed
+                    break
             elif msg_type == "notification":
                 event = data["payload"]["event"]
                 await handle_redemption_event(event, settings)
             elif msg_type == "session_reconnect":
-                logger.warning("Reconnect message received. A new connection will be attempted.")
+                logger.warning("Reconnect message received. Reconnecting...")
             elif msg_type == "session_keepalive":
                 pass 
             else:
@@ -150,25 +148,24 @@ async def listen_to_eventsub(settings: dict):
 
 # --- MAIN EXECUTION BLOCK ---
 async def main():
+    # ... (без изменений)
     logger.warning("=" * 60); logger.warning("Bot is starting..."); logger.warning("=" * 60)
     settings = load_settings()
     if not all(k in settings for k in ["twitch_channel_name", "twitch_oauth_token", "twitch_client_id"]):
         if not initial_setup(settings):
             logger.info("Setup cancelled. Exiting.")
             return
-
     try:
         await listen_to_eventsub(settings)
     except websockets.exceptions.ConnectionClosed as e:
         logger.error(f"Connection closed: {e.code} {e.reason}")
-        if "4001" in str(e.reason): # 4001 is invalid token
+        if "4001" in str(e.reason):
             logger.error("AUTHORIZATION FAILED. The token is likely invalid or expired.")
             settings["twitch_oauth_token"] = ""
             save_settings(settings)
             logger.info("Invalid token has been cleared. Restart the bot.")
     except Exception as e:
         logger.error(f"A critical error occurred: {e}")
-
     logger.info("Program has terminated.")
 
 if __name__ == "__main__":
