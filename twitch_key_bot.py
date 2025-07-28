@@ -187,7 +187,10 @@ async def main_loop():
         RESTART_FLAG = False
         channel_name = app_settings.get("twitch_channel_name")
         token = app_settings.get("twitch_oauth_token")
-        twitch_client = Client() 
+        
+        # This is the corrected line
+        twitch_client = Client(token=token) 
+        
         pubsub_pool = PubSubPool(twitch_client)
         topic_str = "channel-points-channel-v1"
         console_task = asyncio.create_task(console_input_worker())
@@ -197,7 +200,8 @@ async def main_loop():
                 logger.error(f"Channel '{channel_name}' not found.")
                 break
             channel_id = users[0].id
-            await pubsub_pool.subscribe_topic(f"{topic_str}.{channel_id}", token, on_channel_points)
+            # The token is not needed here for this library version
+            await pubsub_pool.subscribe_topic(f"{topic_str}.{channel_id}", on_channel_points)
             logger.info(f"Successfully subscribed to channel points events for '{channel_name}'.")
             logger.warning("=" * 60)
             logger.warning("Bot is running. To stop, press Ctrl+C or type 'exit'.")
