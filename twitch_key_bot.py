@@ -91,9 +91,10 @@ async def handle_redemption_event(event: dict, settings: dict):
         logger.error(f"Error processing reward: {e}")
 
 async def subscribe_to_events(session_id: str, settings: dict):
+    token = settings['twitch_oauth_token']
     headers = {
         "Client-ID": settings["twitch_client_id"],
-        "Authorization": f"Bearer {settings['twitch_oauth_token']}",
+        "Authorization": f"Bearer {token}",
         "Content-Type": "application/json"
     }
     # 1. Get broadcaster ID
@@ -142,9 +143,8 @@ async def listen_to_eventsub(settings: dict):
                 await handle_redemption_event(event, settings)
             elif msg_type == "session_reconnect":
                 logger.warning("Reconnect message received. A new connection will be attempted.")
-                # The library handles this automatically by reconnecting
             elif msg_type == "session_keepalive":
-                pass # Keepalive received, connection is healthy
+                pass 
             else:
                 logger.info(f"Received unknown message type: {msg_type}")
 
@@ -159,14 +159,15 @@ async def main():
 
     try:
         await listen_to_eventsub(settings)
-    except Exception as e:
-        if "401" in str(e) or "invalid token" in str(e).lower():
+    except websockets.exceptions.ConnectionClosed as e:
+        logger.error(f"Connection closed: {e.code} {e.reason}")
+        if "4001" in str(e.reason): # 4001 is invalid token
             logger.error("AUTHORIZATION FAILED. The token is likely invalid or expired.")
             settings["twitch_oauth_token"] = ""
             save_settings(settings)
             logger.info("Invalid token has been cleared. Restart the bot.")
-        else:
-            logger.error(f"A critical error occurred: {e}")
+    except Exception as e:
+        logger.error(f"A critical error occurred: {e}")
 
     logger.info("Program has terminated.")
 
