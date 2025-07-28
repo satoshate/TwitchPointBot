@@ -86,17 +86,26 @@ async def handle_key_action(key_name: str):
         else: logger.warning(f"Действие для '{key.upper()}' не определено.")
     except Exception as e: logger.error(f"Ошибка при нажатии '{key.upper()}': {e}")
 
-@PubSubPool.event_meta(topic='channel-points-channel-v1')
-async def on_channel_points(event: object):
+# ### ИЗМЕНЕНИЕ ###: Убрали декоратор, это снова просто функция
+async def on_channel_points(data: dict):
     try:
-        reward_title = event.data.reward.title
-        user_name = event.data.user.name
+        # Теперь данные это просто словарь (dict)
+        reward_data = data.get('data', {}).get('redemption', {})
+        if not reward_data:
+            return
+            
+        reward_title = reward_data.get('reward', {}).get('title')
+        user_name = reward_data.get('user', {}).get('display_name')
+        
         key_to_press = app_settings.get("rewards", {}).get(reward_title)
+        
         if key_to_press:
             logger.info(f"Награда '{reward_title}' от {user_name} -> Нажимаю '{key_to_press.upper()}'")
             asyncio.create_task(handle_key_action(key_to_press))
-        else: logger.warning(f"Получена не настроенная награда: '{reward_title}'")
-    except Exception as e: logger.error(f"Ошибка при обработке награды: {e}")
+        else:
+            logger.warning(f"Получена не настроенная награда: '{reward_title}'")
+    except Exception as e:
+        logger.error(f"Ошибка при обработке награды: {e}")
 
 # --- ИНТЕРАКТИВНАЯ КОНСОЛЬ ---
 async def console_input_worker():
@@ -183,8 +192,13 @@ async def main_loop():
         RESTART_FLAG = False
         channel_name = app_settings.get("twitch_channel_name")
         token = app_settings.get("twitch_oauth_token")
-        twitch_client = Client(token=token)
+        
+        twitch_client = Client() # ### ИЗМЕНЕНИЕ ###: Клиенту больше не нужен токен
         pubsub_pool = PubSubPool(twitch_client)
+        
+        # ### ИЗМЕНЕНИЕ ###: Регистрируем нашу функцию как слушателя топика
+        topic_str = f"channel-points-channel-v1"
+        
         console_task = asyncio.create_task(console_input_worker())
         try:
             users = await twitch_client.fetch_users(names=[channel_name])
@@ -192,12 +206,18 @@ async def main_loop():
                 logger.error(f"Канал '{channel_name}' не найден.")
                 break
             channel_id = users[0].id
-            await pubsub_pool.subscribe_topics([(channel_id, token)])
+            
+            # ### ИЗМЕНЕНИЕ ###: Подписываемся на топик и указываем callback
+            await pubsub_pool.subscribe_topic(f"{topic_str}.{channel_id}", token, on_channel_points)
+            
             logger.info(f"Успешно подписан на события баллов канала '{channel_name}'.")
             logger.warning("=" * 60)
             logger.warning("Бот запущен. Для остановки нажмите Ctrl+C или введите 'exit'.")
             logger.warning("=" * 60)
-            await asyncio.gather(twitch_client.start(), console_task)
+            
+            # Просто ждем завершения консоли
+            await console_task
+
         except Exception as e:
             if "401" in str(e):
                 logger.error("ОШИБКА АВТОРИЗАЦИИ (401). Ваш токен недействителен.")
@@ -209,9 +229,11 @@ async def main_loop():
             break
         finally:
             if twitch_client and not twitch_client.is_closed():
+                await pubsub_pool.unsubscribe_topic(f"{topic_str}.{channel_id}")
                 await twitch_client.close()
         if not RESTART_FLAG: break
     logger.info("Программа завершена.")
+
 
 if __name__ == "__main__":
     try:
