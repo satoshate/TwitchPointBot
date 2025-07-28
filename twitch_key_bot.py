@@ -24,12 +24,11 @@ class TwitchBot(Client):
     def __init__(self, settings):
         self.app_settings = settings
         token = settings.get("twitch_oauth_token", "")
-        # Автоматически добавляем префикс oauth:, если его нет
+        # Automatically add the "oauth:" prefix if it's missing
         if token and not token.startswith("oauth:"):
             token = f"oauth:{token}"
         
-        # ### ФИНАЛЬНОЕ ИСПРАВЛЕНИЕ ###
-        # Убираем client_id, так как twitchio.Client его не принимает
+        # This is the corrected constructor call, without client_id
         super().__init__(
             token=token,
             initial_channels=[settings.get("twitch_channel_name")]
@@ -49,7 +48,7 @@ class TwitchBot(Client):
                 return
             
             channel_id = users[0].id
-            # Используем токен без префикса для PubSub
+            # The token for pubsub does not need the "oauth:" prefix
             pubsub_token = self.app_settings.get("twitch_oauth_token", "")
             topics = [f"channel-points-channel-v1.{channel_id}"]
             await self.pubsub_subscribe(pubsub_token, *topics)
@@ -63,7 +62,6 @@ class TwitchBot(Client):
             await self.close()
 
     async def event_pubsub_channel_points(self, event):
-        # ... (этот метод без изменений)
         try:
             reward_title = event.reward.title
             user_name = event.user.name
@@ -77,7 +75,6 @@ class TwitchBot(Client):
             logger.error(f"Error processing reward: {e}")
 
     async def handle_key_action(self, key_name: str):
-        # ... (этот метод без изменений)
         key = key_name.lower()
         key_behavior = self.app_settings.get("key_behavior", {})
         try:
@@ -93,7 +90,6 @@ class TwitchBot(Client):
         except Exception as e: logger.error(f"Error while pressing key '{key.upper()}': {e}")
     
     async def console_input_worker(self):
-        # ... (этот метод без изменений)
         logger.info("Control console is active. Type 'help' for a list of commands.")
         while True:
             try:
@@ -112,7 +108,6 @@ class TwitchBot(Client):
                     self.is_restarting = False
                     await self.close()
                     break
-                # ... (остальные команды)
             except asyncio.CancelledError: break
             except Exception as e: logger.error(f"Error in console: {e}")
 
@@ -130,7 +125,7 @@ def save_settings(settings):
     logger.info(f"Settings saved to {SETTINGS_FILE}")
 
 def initial_setup(settings):
-    # ### ФИНАЛЬНОЕ ИСПРАВЛЕНИЕ ###: Убираем запрос Client ID
+    # This function no longer asks for Client ID
     if not settings.get("twitch_channel_name"):
         settings["twitch_channel_name"] = input("Enter your Twitch channel name: ").strip().lower()
 
@@ -138,10 +133,10 @@ def initial_setup(settings):
         print("\n--- GETTING OAuth TOKEN ---")
         print("A browser will now open to generate a token.")
         print("1. On the website, click 'Custom Scope Token'.")
-        print("2. Check the ONE box next to 'channel:read:redemptions'.")
+        print("2. Check ONLY the box next to 'channel:read:redemptions'.")
         print("3. Click 'Generate Token!' and authorize.")
-        print("4. Copy the 'Access Token' (the long string of characters).")
-        if input("Press Enter to open the browser..."): pass
+        print("4. Copy the Access Token (the long string of characters).")
+        input("Press Enter to open the browser...")
         webbrowser.open("https://twitchtokengenerator.com/")
         settings["twitch_oauth_token"] = input("Paste your OAuth token here: ").strip()
         
@@ -155,6 +150,7 @@ def initial_setup(settings):
 def main():
     while True:
         settings = load_settings()
+        # The check no longer includes client_id
         if not all(k in settings for k in ["twitch_channel_name", "twitch_oauth_token"]):
             if not initial_setup(settings): break
         
@@ -165,10 +161,9 @@ def main():
         try:
             bot.run()
         except Exception as e:
-            # Улучшаем обработку ошибки авторизации
-            if "Login unsuccessful" in str(e) or "401" in str(e):
+            if "Login unsuccessful" in str(e):
                 logger.error("AUTHORIZATION FAILED. The token is likely invalid or expired.")
-                settings["twitch_oauth_token"] = "" # Сбрасываем токен, чтобы запросить заново
+                settings["twitch_oauth_token"] = "" # Clear the bad token
                 save_settings(settings)
                 logger.info("Invalid token has been cleared. Please restart the bot to enter a new one.")
             else:
