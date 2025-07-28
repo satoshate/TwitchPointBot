@@ -1,6 +1,6 @@
 @echo off
 chcp 65001 >nul
-title Twitch Channel Points Bot [Auto-Updater]
+title Twitch Channel Points Bot [Auto-Updater v2]
 
 :: =================================================================
 :: 1. НАСТРОЙКА: ПРЯМЫЕ ССЫЛКИ НА GITHUB
@@ -21,54 +21,53 @@ if %errorlevel% neq 0 (
 echo [OK] Скрипт запущен с правами Администратора.
 
 :: =================================================================
-:: 3. СКАЧИВАНИЕ И ПРОВЕРКА ОБНОВЛЕНИЙ (Код без изменений)
+:: 3. СКАЧИВАНИЕ ОБНОВЛЕНИЙ (ПРИНУДИТЕЛЬНО)
 :: =================================================================
 echo.
-echo [UPDATE] Проверяю наличие обновлений...
-curl -s -L %SCRIPT_URL% -o twitch_key_bot.py.new && curl -s -L %REQS_URL% -o requirements.txt.new
+echo [UPDATE] Принудительно скачиваю последнюю версию скрипта...
+
+:: Используем PowerShell, он надежнее для перезаписи файлов
+powershell -Command "Invoke-WebRequest -Uri %SCRIPT_URL% -OutFile twitch_key_bot.py"
 if %errorlevel% neq 0 (
-    powershell -Command "try { Invoke-WebRequest -Uri %SCRIPT_URL% -OutFile twitch_key_bot.py.new } catch {}"
-    powershell -Command "try { Invoke-WebRequest -Uri %REQS_URL% -OutFile requirements.txt.new } catch {}"
+    echo [ERROR] Не удалось скачать twitch_key_bot.py. Проверьте интернет и ссылку в батнике.
+    pause
+    exit
 )
-if not exist "twitch_key_bot.py" ( ren twitch_key_bot.py.new twitch_key_bot.py ) else ( fc /b "twitch_key_bot.py" "twitch_key_bot.py.new" > nul || (del "twitch_key_bot.py" && ren "twitch_key_bot.py.new" "twitch_key_bot.py" && echo [UPDATE] Скрипт обновлен.) )
-if not exist "requirements.txt" ( ren requirements.txt.new requirements.txt ) else ( fc /b "requirements.txt" "requirements.txt.new" > nul || (del "requirements.txt" && ren "requirements.txt.new" "requirements.txt" && echo [UPDATE] Файл зависимостей обновлен. && if exist ".installed_flag" del ".installed_flag") )
-if exist "*.new" del "*.new"
-echo [UPDATE] Проверка завершена.
+
+:: Сравниваем файл зависимостей, чтобы не переустанавливать без нужды
+powershell -Command "Invoke-WebRequest -Uri %REQS_URL% -OutFile requirements.txt.new"
+fc /b "requirements.txt" "requirements.txt.new" > nul
+if %errorlevel% neq 0 (
+    echo [UPDATE] Обнаружены изменения в requirements.txt. Будет произведена переустановка.
+    del "requirements.txt"
+    ren "requirements.txt.new" "requirements.txt"
+    if exist ".installed_flag" del ".installed_flag"
+) else (
+    del "requirements.txt.new"
+)
+
+echo [UPDATE] Файлы успешно обновлены/проверены.
 
 :: =================================================================
-:: 4. РАБОТА С ВИРТУАЛЬНЫМ ОКРУЖЕНИЕМ (VENV) - НОВЫЙ БЛОК
+:: 4. РАБОТА С ВИРТУАЛЬНЫМ ОКРУЖЕНИЕМ (VENV)
 :: =================================================================
 echo.
-:: Проверяем, существует ли папка виртуального окружения
 if not exist ".venv\Scripts\activate.bat" (
     echo [VENV] Виртуальное окружение не найдено. Создаю...
-    
-    :: Проверяем наличие Python
-    python --version >nul 2>&1
-    if %errorlevel% neq 0 (
-        echo [ERROR] Python не найден! Пожалуйста, установите Python с сайта python.org
-        echo [INFO] При установке обязательно поставьте галочку "Add Python to PATH".
-        pause
-        exit
-    )
-    
     python -m venv .venv
     if %errorlevel% neq 0 (
-        echo [ERROR] Не удалось создать виртуальное окружение.
+        echo [ERROR] Не удалось создать виртуальное окружение. Убедитесь, что Python установлен.
         pause
         exit
     )
     echo [VENV] Виртуальное окружение успешно создано.
-    :: Принудительно сбрасываем флаг установки, чтобы библиотеки установились в новое окружение
     if exist ".installed_flag" del ".installed_flag"
 )
-
-:: Активируем виртуальное окружение. Все последующие команды (pip, python) будут выполняться в нем.
 echo [VENV] Активирую виртуальное окружение...
 call .venv\Scripts\activate.bat
 
 :: =================================================================
-:: 5. Установка зависимостей (теперь внутри VENV)
+:: 5. Установка зависимостей (если нужно)
 :: =================================================================
 echo.
 if not exist ".installed_flag" (
@@ -86,7 +85,7 @@ if not exist ".installed_flag" (
 )
 
 :: =================================================================
-:: 6. Запуск бота (теперь внутри VENV)
+:: 6. Запуск бота
 :: =================================================================
 echo.
 echo [START] Запускаю бота...
