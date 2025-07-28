@@ -24,11 +24,9 @@ class TwitchBot(Client):
     def __init__(self, settings):
         self.app_settings = settings
         token = settings.get("twitch_oauth_token", "")
-        # Automatically add the "oauth:" prefix if it's missing
         if token and not token.startswith("oauth:"):
             token = f"oauth:{token}"
         
-        # This is the corrected constructor call, without client_id
         super().__init__(
             token=token,
             initial_channels=[settings.get("twitch_channel_name")]
@@ -48,8 +46,13 @@ class TwitchBot(Client):
                 return
             
             channel_id = users[0].id
-            # The token for pubsub does not need the "oauth:" prefix
+            
+            # ### ФИНАЛЬНОЕ ИСПРАВЛЕНИЕ ###
+            # PubSub тоже требует токен с префиксом "oauth:"
             pubsub_token = self.app_settings.get("twitch_oauth_token", "")
+            if pubsub_token and not pubsub_token.startswith("oauth:"):
+                pubsub_token = f"oauth:{pubsub_token}"
+
             topics = [f"channel-points-channel-v1.{channel_id}"]
             await self.pubsub_subscribe(pubsub_token, *topics)
             logger.info(f"Successfully subscribed to channel points events for '{channel_name}'.")
@@ -125,7 +128,6 @@ def save_settings(settings):
     logger.info(f"Settings saved to {SETTINGS_FILE}")
 
 def initial_setup(settings):
-    # This function no longer asks for Client ID
     if not settings.get("twitch_channel_name"):
         settings["twitch_channel_name"] = input("Enter your Twitch channel name: ").strip().lower()
 
@@ -150,7 +152,6 @@ def initial_setup(settings):
 def main():
     while True:
         settings = load_settings()
-        # The check no longer includes client_id
         if not all(k in settings for k in ["twitch_channel_name", "twitch_oauth_token"]):
             if not initial_setup(settings): break
         
