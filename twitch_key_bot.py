@@ -4,7 +4,8 @@ import json
 import os
 import sys
 import webbrowser
-from twitchio.ext import pubsub
+# ### ИЗМЕНЕНИЕ ###: Импортируем PubSubPool вместо всего модуля pubsub
+from twitchio.ext.pubsub import PubSubPool
 from twitchio.client import Client
 import pyautogui
 import keyboard
@@ -24,6 +25,12 @@ app_settings = {}
 twitch_client = None
 # Флаг для корректного перезапуска
 RESTART_FLAG = False
+
+#
+# ВЕСЬ КОД ДО ФУНКЦИИ main_loop() ОСТАЕТСЯ БЕЗ ИЗМЕНЕНИЙ
+# Я его скрыл для краткости, но он должен быть в вашем файле
+# ... (load_settings, save_settings, initial_setup, handle_key_action, on_channel_points, console_input_worker) ...
+#
 
 # --- ФУНКЦИИ УПРАВЛЕНИЯ НАСТРОЙКАМИ ---
 def load_settings():
@@ -99,17 +106,23 @@ async def handle_key_action(key_name: str):
     except Exception as e: logger.error(f"Ошибка при нажатии '{key.upper()}': {e}")
 
 
-async def on_channel_points(data: pubsub.PubSubChannelPointsMessage):
+# ### ИЗМЕНЕНИЕ ###: Добавляем декоратор снова, но правильный, от PubSubPool
+@PubSubPool.event_meta(topic='channel-points-channel-v1')
+async def on_channel_points(event: object, user_id: int):
     """Вызывается при активации награды за баллы канала."""
-    # (Этот блок кода не изменился)
     try:
-        reward_title = data.reward.title
+        # Теперь данные находятся внутри event.data
+        reward_title = event.data.reward.title
+        user_name = event.data.user.name
         key_to_press = app_settings.get("rewards", {}).get(reward_title)
+        
         if key_to_press:
-            logger.info(f"Награда '{reward_title}' от {data.user.name} -> Нажимаю '{key_to_press.upper()}'")
+            logger.info(f"Награда '{reward_title}' от {user_name} -> Нажимаю '{key_to_press.upper()}'")
             asyncio.create_task(handle_key_action(key_to_press))
-        else: logger.warning(f"Получена не настроенная награда: '{reward_title}'")
-    except Exception as e: logger.error(f"Ошибка при обработке награды: {e}")
+        else:
+            logger.warning(f"Получена не настроенная награда: '{reward_title}'")
+    except Exception as e:
+        logger.error(f"Ошибка при обработке награды: {e}")
 
 
 # --- ИНТЕРАКТИВНАЯ КОНСОЛЬ ---
@@ -212,20 +225,27 @@ async def main_loop():
         channel_name = app_settings.get("twitch_channel_name")
         token = app_settings.get("twitch_oauth_token")
         
+        # ### ИЗМЕНЕНИЕ ###: Создаем клиента и пул PubSub
         twitch_client = Client(token=token)
-        pubsub_service = pubsub.PubSub(twitch_client)
-        pubsub_service.register_callback(pubsub.Topic.channel_points_v1, on_channel_points)
+        pubsub_pool = PubSubPool(twitch_client) # Используем PubSubPool
         
         console_task = asyncio.create_task(console_input_worker())
 
         try:
             users = await twitch_client.fetch_users(names=[channel_name])
             channel_id = users[0].id
-            topics = [pubsub.Topic(channel_id, "channel-points-channel-v1", token)]
-            await pubsub_service.subscribe_topics(topics)
+            
+            # ### ИЗМЕНЕНИЕ ###: Подписываемся на топик через новый метод
+            await pubsub_pool.subscribe_topics([(channel_id, token)])
             logger.info(f"Успешно подписан на события баллов канала '{channel_name}'.")
 
-            await console_task
+            logger.warning("=" * 60)
+            logger.warning("Бот запущен и слушает события баллов канала.")
+            logger.warning("Не закрывайте это окно! Для остановки нажмите Ctrl+C.")
+            logger.warning("=" * 60)
+
+            # Запускаем основной цикл клиента и ждем завершения консоли
+            await asyncio.gather(twitch_client.start(), console_task)
 
         except Exception as e:
             if "401" in str(e):
@@ -235,18 +255,16 @@ async def main_loop():
                 logger.info("Неверный токен сброшен. Перезапустите бота для ввода нового.")
             else:
                 logger.error(f"Критическая ошибка: {e}")
-            console_task.cancel() # Отменяем задачу консоли, если она еще работает
-            break # Выходим из цикла при критической ошибке
+            if not console_task.done():
+                console_task.cancel()
+            break
         finally:
             if twitch_client:
-                # Проверяем, нужно ли отписаться (может быть уже закрыто)
-                if pubsub_service._subscribed_topics:
-                    await pubsub_service.unsubscribe_topics(topics)
-                if not twitch_client.is_closed():
-                    await twitch_client.close()
+                await pubsub_pool.unsubscribe_topics([(channel_id, token)])
+                await twitch_client.close()
 
         if not RESTART_FLAG:
-            break # Выходим из главного цикла, если не было команды restart
+            break
 
     logger.info("Программа завершена.")
 
