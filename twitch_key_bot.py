@@ -4,7 +4,7 @@ import json
 import os
 import sys
 import webbrowser
-from twitchio.ext.pubsub import PubSubPool
+# PubSubPool больше не нужен
 from twitchio.client import Client
 import pyautogui
 import keyboard
@@ -25,6 +25,7 @@ twitch_client = None
 RESTART_FLAG = False
 
 # --- SETTINGS MANAGEMENT ---
+# (Этот блок не меняется)
 def load_settings():
     global app_settings
     if os.path.exists(SETTINGS_FILE):
@@ -69,6 +70,7 @@ def initial_setup():
     return True
 
 # --- CORE BOT LOGIC ---
+# (Этот блок не меняется)
 async def handle_key_action(key_name: str):
     key = key_name.lower()
     key_behavior = app_settings.get("key_behavior", {})
@@ -87,12 +89,14 @@ async def handle_key_action(key_name: str):
         else: logger.warning(f"Action for key '{key.upper()}' is not defined.")
     except Exception as e: logger.error(f"Error while pressing key '{key.upper()}': {e}")
 
-async def on_channel_points(data: dict):
+
+# ### ИЗМЕНЕНИЕ ###: Это теперь функция-обработчик событий для клиента
+# Название event_pubsub_channel_points - специальное, twitchio его поймет
+async def event_pubsub_channel_points(event):
     try:
-        reward_data = data.get('data', {}).get('redemption', {})
-        if not reward_data: return
-        reward_title = reward_data.get('reward', {}).get('title')
-        user_name = reward_data.get('user', {}).get('display_name')
+        # Данные теперь прямо в объекте event
+        reward_title = event.reward.title
+        user_name = event.user.name
         key_to_press = app_settings.get("rewards", {}).get(reward_title)
         if key_to_press:
             logger.info(f"Reward '{reward_title}' from {user_name} -> Pressing '{key_to_press.upper()}'")
@@ -102,7 +106,9 @@ async def on_channel_points(data: dict):
     except Exception as e:
         logger.error(f"Error processing reward: {e}")
 
+
 # --- INTERACTIVE CONSOLE ---
+# (Этот блок не меняется)
 async def console_input_worker():
     global RESTART_FLAG
     loop = asyncio.get_event_loop()
@@ -188,10 +194,11 @@ async def main_loop():
         channel_name = app_settings.get("twitch_channel_name")
         token = app_settings.get("twitch_oauth_token")
         
-        twitch_client = Client(token=token) # The corrected line
+        twitch_client = Client(token=token)
         
-        pubsub_pool = PubSubPool(twitch_client)
-        topic_str = "channel-points-channel-v1"
+        # ### ИЗМЕНЕНИЕ ###: Регистрируем наш обработчик событий напрямую в клиенте
+        twitch_client.add_event(event_pubsub_channel_points, 'event_pubsub_channel_points')
+        
         console_task = asyncio.create_task(console_input_worker())
         try:
             users = await twitch_client.fetch_users(names=[channel_name])
@@ -199,12 +206,19 @@ async def main_loop():
                 logger.error(f"Channel '{channel_name}' not found.")
                 break
             channel_id = users[0].id
-            await pubsub_pool.subscribe_topic(f"{topic_str}.{channel_id}", on_channel_points)
+            
+            # ### ИЗМЕНЕНИЕ ###: Подписываемся на топик через сам клиент
+            topics = [f"channel-points-channel-v1.{channel_id}"]
+            await twitch_client.pubsub_subscribe(token, *topics)
+            
             logger.info(f"Successfully subscribed to channel points events for '{channel_name}'.")
             logger.warning("=" * 60)
             logger.warning("Bot is running. To stop, press Ctrl+C or type 'exit'.")
             logger.warning("=" * 60)
-            await console_task
+
+            # Запускаем основной цикл клиента и ждем завершения консоли
+            await asyncio.gather(twitch_client.start(), console_task)
+
         except Exception as e:
             if "401" in str(e):
                 logger.error("AUTHORIZATION ERROR (401). Your OAuth token is invalid.")
@@ -216,7 +230,8 @@ async def main_loop():
             break
         finally:
             if twitch_client and not twitch_client.is_closed():
-                await pubsub_pool.unsubscribe_topic(f"{topic_str}.{channel_id}")
+                # Отписываемся от топиков перед закрытием
+                await twitch_client.pubsub_unsubscribe(token, *topics)
                 await twitch_client.close()
         if not RESTART_FLAG: break
     logger.info("Program has terminated.")
