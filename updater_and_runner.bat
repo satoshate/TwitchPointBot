@@ -1,6 +1,13 @@
 @echo off
+:: =================================================================
+:: 0. Настройка шрифта и кодировки для корректного отображения кириллицы
+:: =================================================================
+:: Устанавливаем UTF-8
 chcp 65001 >nul
-title Twitch Channel Points Bot [Auto-Updater v2]
+:: С помощью PowerShell меняем шрифт текущего окна консоли на Lucida Console
+:: Это нужно, чтобы русские буквы не превращались в "??????" после смены кодировки.
+powershell -Command "$H = Get-Host; $H.UI.RawUI.WindowTitle = 'Twitch Channel Points Bot'; $C = $H.PrivateData; $C.ConsolePane.FontName = 'Lucida Console'"
+title Twitch Channel Points Bot [Auto-Updater v3]
 
 :: =================================================================
 :: 1. НАСТРОЙКА: ПРЯМЫЕ ССЫЛКИ НА GITHUB
@@ -26,24 +33,23 @@ echo [OK] Скрипт запущен с правами Администрато
 echo.
 echo [UPDATE] Принудительно скачиваю последнюю версию скрипта...
 
-:: Используем PowerShell, он надежнее для перезаписи файлов
-powershell -Command "Invoke-WebRequest -Uri %SCRIPT_URL% -OutFile twitch_key_bot.py"
-if %errorlevel% neq 0 (
-    echo [ERROR] Не удалось скачать twitch_key_bot.py. Проверьте интернет и ссылку в батнике.
-    pause
-    exit
-)
+powershell -Command "try { Invoke-WebRequest -Uri %SCRIPT_URL% -OutFile twitch_key_bot.py } catch { Write-Host '[ERROR] Не удалось скачать twitch_key_bot.py'; exit 1 }"
+if %errorlevel% neq 0 ( pause & exit )
 
 :: Сравниваем файл зависимостей, чтобы не переустанавливать без нужды
-powershell -Command "Invoke-WebRequest -Uri %REQS_URL% -OutFile requirements.txt.new"
-fc /b "requirements.txt" "requirements.txt.new" > nul
-if %errorlevel% neq 0 (
-    echo [UPDATE] Обнаружены изменения в requirements.txt. Будет произведена переустановка.
-    del "requirements.txt"
-    ren "requirements.txt.new" "requirements.txt"
-    if exist ".installed_flag" del ".installed_flag"
+powershell -Command "try { Invoke-WebRequest -Uri %REQS_URL% -OutFile requirements.txt.new } catch {}"
+if exist "requirements.txt" (
+    fc /b "requirements.txt" "requirements.txt.new" > nul
+    if %errorlevel% neq 0 (
+        echo [UPDATE] Обнаружены изменения в requirements.txt. Будет произведена переустановка.
+        del "requirements.txt"
+        ren "requirements.txt.new" "requirements.txt"
+        if exist ".installed_flag" del ".installed_flag"
+    ) else (
+        del "requirements.txt.new"
+    )
 ) else (
-    del "requirements.txt.new"
+    ren "requirements.txt.new" "requirements.txt"
 )
 
 echo [UPDATE] Файлы успешно обновлены/проверены.
@@ -90,7 +96,7 @@ if not exist ".installed_flag" (
 echo.
 echo [START] Запускаю бота...
 echo.
-python "%~dp0\twitch_key_bot.py"
+python -X utf8 "%~dp0\twitch_key_bot.py"
 
 echo.
 echo [INFO] Бот завершил работу. Нажмите любую клавишу для закрытия окна.
