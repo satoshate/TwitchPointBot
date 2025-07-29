@@ -59,7 +59,6 @@ def initial_setup(settings):
         print("Go to your Twitch Developer Console (dev.twitch.tv/console/apps).")
         while True:
             client_id = input("Paste your Client ID here: ").strip()
-            # ### ИЗМЕНЕНИЕ ###: Более гибкая проверка Client ID
             if re.match(r"^[a-zA-Z0-9]{20,}$", client_id):
                 settings["twitch_client_id"] = client_id
                 break
@@ -81,7 +80,6 @@ def initial_setup(settings):
         
         while True:
             token = input("Paste your freshly generated OAuth token here: ").strip()
-            # ### ИЗМЕНЕНИЕ ###: Более гибкая проверка токена
             if re.match(r"^[a-z0-9]{20,}$", token):
                 settings["twitch_oauth_token"] = token
                 break
@@ -181,13 +179,12 @@ async def listen_to_eventsub(http_session: aiohttp.ClientSession, settings: dict
                     event = data["payload"]["event"]
                     await handle_redemption_event(event, settings)
                 elif msg_type == "session_reconnect":
-                    # ### ИЗМЕНЕНИЕ ###: Улучшенная обработка reconnect
                     reconnect_url = data["payload"]["session"]["reconnect_url"]
                     logger.warning(f"Reconnect message received. Twitch requests a new connection to: {reconnect_url}. Restarting bot...")
                     RESTART_FLAG = True
-                    break # Выходим из цикла, чтобы инициировать перезапуск
+                    break
                 elif msg_type == "session_keepalive":
-                    pass # Keepalive received, connection is healthy
+                    pass
     except asyncio.CancelledError:
         logger.info("EventSub listener task cancelled.")
     except websockets.exceptions.ConnectionClosed as e:
@@ -232,6 +229,9 @@ async def console_input_worker(settings: dict):
                 status_settings = settings.copy()
                 if 'twitch_oauth_token' in status_settings:
                     status_settings['twitch_oauth_token'] = f"***{status_settings['twitch_oauth_token'][-4:]}"
+                # ### ФИНАЛЬНЫЙ ШТРИХ ###: Маскируем Client ID
+                if 'twitch_client_id' in status_settings:
+                    status_settings['twitch_client_id'] = f"***{status_settings['twitch_client_id'][-4:]}"
                 print(json.dumps(status_settings, ensure_ascii=False, indent=4), flush=True)
                 print("------------------------\n", flush=True)
             
@@ -255,10 +255,8 @@ async def console_input_worker(settings: dict):
             elif command in ["holdkey", "presskey"] and len(parts) > 2:
                 key_list_name = "single_press_keys" if command == "presskey" else "hold_keys"
                 action, key = parts[1].lower(), parts[2].lower()
-                
                 if "key_behavior" not in settings: settings["key_behavior"] = {}
                 if key_list_name not in settings["key_behavior"]: settings["key_behavior"][key_list_name] = []
-
                 if action == "add":
                     if key not in settings["key_behavior"][key_list_name]:
                         settings["key_behavior"][key_list_name].append(key)
