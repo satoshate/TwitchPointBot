@@ -3,3 +3,6 @@ keyboard
 aiohttp
 websockets
 pygame
+pydirectinput
+pygetwindow
+psutil
